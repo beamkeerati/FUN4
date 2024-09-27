@@ -4,7 +4,7 @@ import rclpy
 from rclpy.node import Node
 
 from tf2_ros import TransformListener, Buffer
-from geometry_msgs.msg import Twist, Point, TransformStamped, PoseStamped, Quaternion
+from geometry_msgs.msg import TransformStamped, Twist
 from std_msgs.msg import String
 from robot_interfaces.srv import Scheduler, RandomEndeffector, ControllerData
 import numpy as np
@@ -47,8 +47,8 @@ class ControllerNode(Node):
         self.source_frame = "link_0"
 
         # Robot parameters
-        self.kp = 1.0
-        self.q = np.array([0.0, 0.0, 0.0])
+        self.kp = 1.0  # Proportional gain
+        self.q = np.array([0.0, 0.0, 0.0])  # Initial joint angles
         self.r_max = 0.28 + 0.25
         self.r_min = 0.03
         self.l = 0.2
@@ -63,6 +63,18 @@ class ControllerNode(Node):
         self.joint_state.header.frame_id = ""
         self.joint_state.name = ["joint_1", "joint_2", "joint_3"]
         self.joint_state.position = [0.0, 0.0, 0.0]
+
+        # Define robot once in __init__
+        self.robot = rtb.DHRobot(
+            [
+                rtb.RevoluteMDH(alpha=0.0, a=0.0, d=0.2, offset=0.0),
+                rtb.RevoluteMDH(alpha=pi / 2, a=0.0, d=0.02, offset=0.0),
+                rtb.RevoluteMDH(alpha=0.0, a=0.25, d=0.0, offset=0.0),
+            ],
+            tool=SE3.Tx(0.28),
+            name="RRR_Robot",
+        )
+        self.publish_joint_state(np.array([0.0, 0.0, 0.0]))
 
         self.get_logger().info("controller_node has been started.")
 
@@ -103,16 +115,8 @@ class ControllerNode(Node):
 
     def control_to_pos(self, p_set):
         try:
-            # Robot definition
-            robot = rtb.DHRobot(
-                [
-                    rtb.RevoluteMDH(alpha=0.0, a=0.0, d=0.2, offset=0.0),
-                    rtb.RevoluteMDH(alpha=pi / 2, a=0.0, d=0.02, offset=0.0),
-                    rtb.RevoluteMDH(alpha=0.0, a=0.25, d=0.0, offset=0.0),
-                ],
-                tool=SE3.Tx(0.28),
-                name="RRR_Robot",
-            )
+            # Using the robot defined in __init__
+            robot = self.robot
 
             p_setpoint = np.array(p_set)
             p_now = self.get_transform()
@@ -128,6 +132,18 @@ class ControllerNode(Node):
             # Compute Jacobian
             J = robot.jacob0(self.q)
             J_pos = J[0:3, :]  # Position part of the Jacobian
+
+            # Singularity checking by determinant
+            det_J = np.linalg.det(J_pos)
+            det_threshold = 1e-100  
+
+            if abs(det_J) < det_threshold:
+                self.get_logger().warning(
+                    f"Near singularity detected. Determinant of J: {det_J:.20f}. Stopping movement."
+                )
+                self.controller_state = "IDLE"
+                return False
+
             # Compute joint velocities (q_dot)
             q_dot = np.linalg.pinv(J_pos) @ p_dot
 
@@ -152,7 +168,9 @@ class ControllerNode(Node):
     def get_transform(self):
         try:
             now = rclpy.time.Time()
-            transform = self.tf_buffer.lookup_transform("link_0", "end_effector", now)
+            transform = self.tf_buffer.lookup_transform(
+                self.source_frame, self.target_frame, now
+            )
             position = transform.transform.translation
             orientation = transform.transform.rotation
             x = position.x
@@ -166,25 +184,18 @@ class ControllerNode(Node):
 
         except Exception as e:
             self.get_logger().error(f"Failed to get transform: {e}")
+            self.publish_joint_state(np.array([0.0, 0.0, 0.0])) #Reborn
             return None
 
     def inverse_kinematic(self, x, y, z):
         distance_squared = x**2 + y**2 + (z - 0.2) ** 2
         if self.r_min**2 <= distance_squared <= self.r_max**2:
 
-            robot = rtb.DHRobot(
-                [
-                    rtb.RevoluteMDH(alpha=0.0, a=0.0, d=0.2, offset=0.0),
-                    rtb.RevoluteMDH(alpha=pi / 2, a=0.0, d=0.02, offset=0.0),
-                    rtb.RevoluteMDH(alpha=0, a=0.25, d=0.0, offset=0.0),
-                ],
-                tool=SE3.Tx(0.28),
-                name="RRR_Robot",
-            )
+            robot = self.robot  # Use the robot defined in __init__
 
             T_Position = SE3(x, y, z)
             ik_solution = robot.ikine_LM(
-                T_Position, mask=[1, 1, 1, 0, 0, 0], joint_limits=False, q0=[0, 0, 0]
+                T_Position, mask=[1, 1, 1, 0, 0, 0], joint_limits=False, q0=self.q
             )
 
             if ik_solution.success:
