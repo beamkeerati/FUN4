@@ -32,6 +32,7 @@ install(PROGRAMS
   scripts/robot_scheduler.py
   scripts/controller.py
   scripts/teleop_twist_key.py
+  scripts/pure_transform.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

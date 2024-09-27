@@ -8,7 +8,13 @@ from tf2_ros import TransformListener, Buffer
 from geometry_msgs.msg import Twist, Point, TransformStamped, PoseStamped, Quaternion
 from std_msgs.msg import String
 from robot_interfaces.srv import Scheduler, RandomEndeffector, ControllerData
-import numpy as np  # Added import
+import numpy as np
+
+#Inverse Kinematics
+import roboticstoolbox as rtb
+from math import pi
+from spatialmath import SE3
+
 
 class ControllerNode(Node):
     def __init__(self):
@@ -33,6 +39,8 @@ class ControllerNode(Node):
         self.target_frame = "end_effector"
         self.source_frame = "link_0"
 
+
+
         self.get_logger().info("controller_node has been started.")
 
     def controller_server_callback(self, request: ControllerData.Request, response: ControllerData.Response):
@@ -44,23 +52,29 @@ class ControllerNode(Node):
 
     def current_state_callback(self, msg: String):
         self.current_state = msg.data
-        
+
     def get_transform(self):
         try:
             now = rclpy.time.Time()
             transform = self.tf_buffer.lookup_transform(
-                'link_0',   
-                'end_effector',   
+                'link_0',
+                'end_effector',
                 now)
             position = transform.transform.translation
             orientation = transform.transform.rotation
-            
-            self.get_logger().info(f"End Effector Position: {position.x}, {position.y}, {position.z}")
-            #self.get_logger().info(f"End Effector Orientation: {orientation.x}, {orientation.y}, {orientation.z}, {orientation.w}")
-        
+            x = position.x
+            y = position.y
+            z = position.z
+
+
+            self.get_logger().info(
+                f"End Effector Position: {position.x}, {position.y}, {position.z} "
+            )
+            # self.get_logger().info(f"End Effector Orientation: {orientation.x}, {orientation.y}, {orientation.z}, {orientation.w}")
+
         except Exception as e:
             self.get_logger().error(f"Failed to get transform: {e}")
-            
+
     def timer_callback(self):
         self.get_transform()
 
