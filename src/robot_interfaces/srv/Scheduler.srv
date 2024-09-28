@@ -1,5 +1,5 @@
 std_msgs/String state
 std_msgs/String button
-std_msgs/String data
+geometry_msgs/Point position
 ---
 bool inprogress

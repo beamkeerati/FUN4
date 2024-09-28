@@ -60,7 +60,7 @@ class PureTransformNode(Node):
             q = self.inverse_kinematic(
                 float(response.position.x),
                 float(response.position.y),
-                float(response.position.z),
+                float(response.position.z)
             )
 
             if q is not None:

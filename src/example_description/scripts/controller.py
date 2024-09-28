@@ -34,11 +34,12 @@ class ControllerNode(Node):
         )
         self.controller_state = "IDLE"
 
-        # Create robot state subscriber
+        # Create robot state subscriber and client
         self.current_state = "IDLE"
         self.create_subscription(
             String, "/current_state", self.current_state_callback, 10
         )
+        self.scheduler_client = self.create_client(Scheduler, "robot_state_server")
 
         # Create TF subscriber to pub topic /end_effector
         self.tf_buffer = Buffer()
@@ -78,6 +79,12 @@ class ControllerNode(Node):
 
         self.get_logger().info("controller_node has been started.")
 
+    def req_scheduler(self,state):
+        self.get_logger().info("Request robot_scheduler node")
+        state_request = Scheduler.Request()
+        state_request.state.data = str(state)
+        future = self.scheduler_client.call_async(state_request)
+
     def controller_server_callback(
         self, request: ControllerData.Request, response: ControllerData.Response
     ):
@@ -87,6 +94,14 @@ class ControllerNode(Node):
         self.controller_state = request.mode.data
         if self.controller_state == "AUTO":
             self.random_setpoint = [
+                float(request.position.x),
+                float(request.position.y),
+                float(request.position.z),
+            ]
+
+        elif self.controller_state == "IK":
+
+            self.ik_setpoint = [
                 float(request.position.x),
                 float(request.position.y),
                 float(request.position.z),
@@ -108,7 +123,10 @@ class ControllerNode(Node):
         self.joint_state.header.stamp = self.get_clock().now().to_msg()
 
         # Update joint positions
-        self.joint_state.position = positions.tolist()  # Ensure it's a list
+        try:
+            self.joint_state.position = positions.tolist()  # Ensure it's a list
+        except:
+            self.joint_state.position = positions # Ensure it's a list
 
         self.joint_state_publisher.publish(self.joint_state)
         self.get_logger().info("Published JointState message.")
@@ -141,6 +159,7 @@ class ControllerNode(Node):
                 self.get_logger().warning(
                     f"Near singularity detected. Determinant of J: {det_J:.20f}. Stopping movement."
                 )
+                self.req_scheduler("IDLE")
                 self.controller_state = "IDLE"
                 return False
 
@@ -156,6 +175,7 @@ class ControllerNode(Node):
 
             if np.linalg.norm(error) <= 0.001:
                 self.get_logger().info("Target position reached.")
+                self.req_scheduler("IDLE")
                 self.controller_state = "IDLE"
                 return False
             else:
@@ -214,6 +234,14 @@ class ControllerNode(Node):
                 continue_control = self.control_to_pos(self.random_setpoint)
                 if not continue_control:
                     self.get_logger().info("Switching to IDLE state.")
+                    self.req_scheduler("IDLE")
+                    self.controller_state = "IDLE"
+
+            if self.controller_state == "IK":
+                continue_control = self.control_to_pos(self.ik_setpoint)
+                if not continue_control:
+                    self.get_logger().info("Switching to IDLE state.")
+                    self.req_scheduler("IDLE")
                     self.controller_state = "IDLE"
         except Exception as e:
             self.get_logger().error(f"Failed in timer_callback: {e}")

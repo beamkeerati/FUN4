@@ -86,6 +86,37 @@ class RobotSchedulerNode(Node):
             self.get_logger().error(f"Failed : {e}")
             return None
 
+    def req_ik(self,request):
+        try:
+
+            self.get_logger().info(
+                f"Received Response - x: {request.position.x}, y: {request.position.y}, z: {request.position.z}"
+            )
+            q = self.inverse_kinematic(
+                float(request.position.x),
+                float(request.position.y),
+                float(request.position.z),
+            )
+
+            if q is not None:
+                self.get_logger().info(f"Computed joint angles: {q}")
+                Pe = [
+                    float(request.position.x),
+                    float(request.position.y),
+                    float(request.position.z),
+                ]
+
+                self.req_controller("IK", Pe)
+            else:
+                self.get_logger().error(
+                    "Could not compute joint angles for the given position."
+                )
+                self.current_state = "IDLE"
+
+        except Exception as e:
+            self.get_logger().error(f"An error occurred: {e}")
+            self.current_state = "IDLE"
+
     def robot_state_server_callback(self, request: Scheduler, response: Scheduler):
         self.get_logger().info(
             f"Request To Change State from {str(self.current_state)} to : {str(request.state.data)}"
@@ -94,6 +125,9 @@ class RobotSchedulerNode(Node):
 
         if str(request.state.data) == "AUTO":
             self.req_random()
+
+        if str(request.state.data) == "IK":
+            self.req_ik(request)
 
         response.inprogress = True
         return response

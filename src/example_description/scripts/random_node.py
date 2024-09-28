@@ -27,6 +27,7 @@ class RandomNode(Node):
 
         # Set Subscribe Current State
         self.create_subscription(String, "/current_state", self.current_state_callback, 10)
+        self.scheduler_client = self.create_client(Scheduler, "robot_state_server")
 
         # Create Random Server for calculate inverse kinematics
         self.random_server = self.create_service(RandomEndeffector, "random_server", self.random_server_callback)
@@ -36,6 +37,12 @@ class RandomNode(Node):
 
         self.current_state = "IDLE"
         self.get_logger().info("random_node has been started.")
+
+    def req_scheduler(self, state):
+        self.get_logger().info("Request robot_scheduler node")
+        state_request = Scheduler.Request()
+        state_request.state.data = str(state)
+        future = self.scheduler_client.call_async(state_request)
 
     def random_server_callback(self, request:RandomEndeffector, response:RandomEndeffector):
 
@@ -95,6 +102,7 @@ class RandomNode(Node):
                 return q_sol_ik_LM
             else:
                 self.get_logger().error("Inverse kinematics failed to find a solution.")
+                self.req_scheduler("IDLE")
                 return None
         else:
             self.get_logger().error("Target position is out of reach.")
