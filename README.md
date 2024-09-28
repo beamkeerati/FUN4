@@ -69,4 +69,4 @@ The rough usage method is as follows:
 ## Control
 - To change the robot's state, move the mouse to click on **Terminal 2** and press the **s,a,f,g** keys to **change the mode**.
 - When in Teleop mode, to control the End-Effector, hover your mouse over **Terminal 3** and press the **u i o j k l m , .** buttons to control the robot's movement. If it's a Holomonic, **hold down shift throughout** the control.
-- Details and movement characteristics, you can try it yourself and observe it.
+- Details and movement characteristics, you can try it yourself and observe it.From Terminal 3.
