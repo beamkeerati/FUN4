@@ -8,7 +8,7 @@ A simulation system of a 3R robotic arm that does not take into account collisio
 ## Features
 
 - Can be run by opening only 3 files.
-- Arrows indicate the position of the End-effector (purple) and the Target position (green).
+- Arrows indicate the position of the End-effector **(purple)** and the Target position **(green)**.
 - Every step of the work process is displayed with logs, supporting Exception Handling.
 - Supports 3 working modes: Auto, Inverse, Teleop
 - Prevent movements that will cause a singularity by checking through the determinant of the Jacobian matrix.
