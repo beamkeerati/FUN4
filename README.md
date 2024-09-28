@@ -1,7 +1,7 @@
 
 # Hello World 3R Manipulator
 
-A simulation system of a 3R robotic arm that does not take into account collisions and forces, controlled via CLI and displayed via RVIZ.
+A simulation system of a 3R robotic arm that does not take into account collisions and forces, controlled via CLI and displayed via RVIZ. Support Only **Ubuntu 22.04 LTS**.
 
 ![alt text](image/overall.png)
 
@@ -11,6 +11,7 @@ A simulation system of a 3R robotic arm that does not take into account collisio
 - Arrows indicate the position of the End-effector (purple) and the Target position (green).
 - Every step of the work process is displayed with logs, supporting Exception Handling.
 - Supports 3 working modes: Auto, Inverse, Teleop
+- Prevent movements that will cause a singularity by checking through the determinant of the Jacobian matrix.
 
 
 ## Installation
@@ -26,6 +27,7 @@ A simulation system of a 3R robotic arm that does not take into account collisio
     pip3 install roboticstoolbox-python
     sudo apt install ros-humble-desktop-full
     sudo apt install ros-dev-tools
+    sudo apt install ros-humble-teleop-twist-keyboard
 ```
 
 Go somewhere like your home directory and clone this package.
@@ -64,3 +66,7 @@ The rough usage method is as follows:
 ```bash
     ros2 run teleop_twist_keyboard  teleop_twist_keyboard
 ```
+## Control
+- To change the robot's state, move the mouse to click on **Terminal 2** and press the **s,a,f,g** keys to **change the mode**.
+- When in Teleop mode, to control the End-Effector, hover your mouse over **Terminal 3** and press the **u i o j k l m , .** buttons to control the robot's movement. If it's a Holomonic, **hold down shift throughout** the control.
+- Details and movement characteristics, you can try it yourself and observe it.
