@@ -78,9 +78,10 @@ class RobotSchedulerNode(Node):
             self.get_logger().info("Controller node")
             controller_request = ControllerData.Request()
             controller_request.mode.data = str(mode)
-            controller_request.position.x = pos[0]
-            controller_request.position.y = pos[1]
-            controller_request.position.z = pos[2]
+            controller_request.position.x = float(pos[0])
+            controller_request.position.y = float(pos[1])
+            controller_request.position.z = float(pos[2])
+
             self.controller_client.call_async(controller_request)
         except Exception as e:
             self.get_logger().error(f"Failed : {e}")
@@ -126,8 +127,14 @@ class RobotSchedulerNode(Node):
         if str(request.state.data) == "AUTO":
             self.req_random()
 
-        if str(request.state.data) == "IK":
+        elif str(request.state.data) == "IK":
             self.req_ik(request)
+
+        elif str(request.state.data) == "TELEOP":
+            if str(request.button.data) == "F":
+                self.req_controller("TELEOP_F", [0.0, 0.0, 0.0])
+            elif str(request.button.data) == "G":
+                self.req_controller("TELEOP_G", [0.0, 0.0, 0.0])
 
         response.inprogress = True
         return response

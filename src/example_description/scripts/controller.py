@@ -41,6 +41,12 @@ class ControllerNode(Node):
         )
         self.scheduler_client = self.create_client(Scheduler, "robot_state_server")
 
+        # Create cmd_vel subscriber
+        self.create_subscription(Twist, "cmd_vel", self.cmd_vel_callback, 10)
+        self.tele_x = 0
+        self.tele_y = 0
+        self.tele_z = 0
+
         # Create TF subscriber to pub topic /end_effector
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -79,6 +85,13 @@ class ControllerNode(Node):
 
         self.get_logger().info("controller_node has been started.")
 
+    def cmd_vel_callback(self, msg: Twist):
+        self.tele_x = msg.linear.x
+        self.tele_y = msg.linear.y
+        self.tele_z = msg.linear.z
+        if self.controller_state == "TELEOP_G":
+            continue_control = self.control_vel("TELEOP_G")
+
     def req_scheduler(self,state):
         self.get_logger().info("Request robot_scheduler node")
         state_request = Scheduler.Request()
@@ -100,12 +113,17 @@ class ControllerNode(Node):
             ]
 
         elif self.controller_state == "IK":
-
             self.ik_setpoint = [
                 float(request.position.x),
                 float(request.position.y),
                 float(request.position.z),
             ]
+
+        elif self.controller_state == "TELEOP_F":
+            pass
+
+        elif self.controller_state == "TELEOP_G":
+            pass
 
         response.inprogress = True
         return response
@@ -130,6 +148,48 @@ class ControllerNode(Node):
 
         self.joint_state_publisher.publish(self.joint_state)
         self.get_logger().info("Published JointState message.")
+
+    def control_vel(self, mode):
+        try:
+            # Using the robot defined in __init__
+            robot = self.robot
+
+            p_now = self.get_transform()
+            if p_now is None:
+                self.get_logger().error(
+                    "Current end-effector position could not be retrieved."
+                )
+                return False
+
+            # Compute desired end-effector velocity (p_dot)
+            p_dot = np.array([self.tele_x, self.tele_y, self.tele_z])
+            # Compute Jacobian
+            J = robot.jacob0(self.q)
+            J_pos = J[0:3, :]  # Position part of the Jacobian
+
+            # Singularity checking by determinant
+            det_J = np.linalg.det(J_pos)
+            det_threshold = 1e-100
+
+            if abs(det_J) < det_threshold:
+                self.get_logger().warning(
+                    f"Near singularity detected. Determinant of J: {det_J:.20f}. Stopping movement."
+                )
+                return False
+
+            # Compute joint velocities (q_dot)
+            q_dot = np.linalg.pinv(J_pos) @ p_dot
+
+            # Update joint angles
+            self.q = self.q + q_dot * (1.0 / self.frequency)
+            self.get_logger().info(f"q : {self.q}")
+
+            # Publish joint states
+            self.publish_joint_state(self.q)
+
+        except Exception as e:
+            self.get_logger().error(f"Failed in control_vel: {e}")
+            return False
 
     def control_to_pos(self, p_set):
         try:
@@ -237,12 +297,20 @@ class ControllerNode(Node):
                     self.req_scheduler("IDLE")
                     self.controller_state = "IDLE"
 
-            if self.controller_state == "IK":
+            elif self.controller_state == "IK":
                 continue_control = self.control_to_pos(self.ik_setpoint)
                 if not continue_control:
                     self.get_logger().info("Switching to IDLE state.")
                     self.req_scheduler("IDLE")
                     self.controller_state = "IDLE"
+
+            # elif self.controller_state == "TELEOP_G":
+            #     continue_control = self.control_vel("TELEOP_G")
+                # if not continue_control:
+                #     self.get_logger().info("Switching to IDLE state.")
+                #     self.req_scheduler("IDLE")
+                #     self.controller_state = "IDLE"
+
         except Exception as e:
             self.get_logger().error(f"Failed in timer_callback: {e}")
             return None
