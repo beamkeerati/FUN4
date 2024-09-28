@@ -108,15 +108,18 @@ class RobotSchedulerNode(Node):
                 ]
 
                 self.req_controller("IK", Pe)
+                return True
             else:
                 self.get_logger().error(
                     "Could not compute joint angles for the given position."
                 )
                 self.current_state = "IDLE"
+                return False
 
         except Exception as e:
             self.get_logger().error(f"An error occurred: {e}")
             self.current_state = "IDLE"
+            return False
 
     def robot_state_server_callback(self, request: Scheduler, response: Scheduler):
         self.get_logger().info(
@@ -126,9 +129,13 @@ class RobotSchedulerNode(Node):
 
         if str(request.state.data) == "AUTO":
             self.req_random()
+            response.inprogress = True
+            response.mode_readback.data = "AUTO"
 
         elif str(request.state.data) == "IK":
-            self.req_ik(request)
+            response.inprogress = self.req_ik(request)
+            response.mode_readback.data = "IK"
+            self.get_logger().info(f"response {response.mode_readback.data}")
 
         elif str(request.state.data) == "TELEOP":
             if str(request.button.data) == "F":
@@ -136,7 +143,8 @@ class RobotSchedulerNode(Node):
             elif str(request.button.data) == "G":
                 self.req_controller("TELEOP_G", [0.0, 0.0, 0.0])
 
-        response.inprogress = True
+            response.inprogress = True
+
         return response
 
     def inverse_kinematic(self, x, y, z):

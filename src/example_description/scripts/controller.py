@@ -4,8 +4,8 @@ import rclpy
 from rclpy.node import Node
 
 from tf2_ros import TransformListener, Buffer
-from geometry_msgs.msg import TransformStamped, Twist
-from std_msgs.msg import String
+from geometry_msgs.msg import TransformStamped, Twist,PoseStamped
+from std_msgs.msg import String,Header
 from robot_interfaces.srv import Scheduler, RandomEndeffector, ControllerData
 import numpy as np
 
@@ -13,7 +13,7 @@ import numpy as np
 import roboticstoolbox as rtb
 from math import pi
 from spatialmath import SE3
-
+from scipy.spatial.transform import Rotation as R  # Import scipy Rotation
 from sensor_msgs.msg import JointState  # Import JointState message
 
 
@@ -53,6 +53,10 @@ class ControllerNode(Node):
         self.target_frame = "end_effector"
         self.source_frame = "link_0"
 
+        # pub target and end_effector
+        self.target_pub = self.create_publisher(PoseStamped, "/target", 10)
+        self.endeff_pub = self.create_publisher(PoseStamped, "/end_effector", 10)
+
         # Robot parameters
         self.kp = 1.0  # Proportional gain
         self.q = np.array([0.0, 0.0, 0.0])  # Initial joint angles
@@ -91,8 +95,10 @@ class ControllerNode(Node):
         self.tele_z = msg.linear.z
         if self.controller_state == "TELEOP_G":
             continue_control = self.control_vel("TELEOP_G")
+        elif self.controller_state == "TELEOP_F":
+            continue_control = self.control_vel("TELEOP_F")
 
-    def req_scheduler(self,state):
+    def req_scheduler(self, state):
         self.get_logger().info("Request robot_scheduler node")
         state_request = Scheduler.Request()
         state_request.state.data = str(state)
@@ -105,6 +111,7 @@ class ControllerNode(Node):
             f"Request to change controller state from {self.controller_state} to: {request.mode.data}"
         )
         self.controller_state = request.mode.data
+
         if self.controller_state == "AUTO":
             self.random_setpoint = [
                 float(request.position.x),
@@ -144,7 +151,7 @@ class ControllerNode(Node):
         try:
             self.joint_state.position = positions.tolist()  # Ensure it's a list
         except:
-            self.joint_state.position = positions # Ensure it's a list
+            self.joint_state.position = positions  # Ensure it's a list
 
         self.joint_state_publisher.publish(self.joint_state)
         self.get_logger().info("Published JointState message.")
@@ -154,7 +161,11 @@ class ControllerNode(Node):
             # Using the robot defined in __init__
             robot = self.robot
 
-            p_now = self.get_transform()
+            result = self.get_transform()
+            if result is None:
+                self.get_logger().error("get_transform returned None.")
+                return False
+            p_now, r_e = result
             if p_now is None:
                 self.get_logger().error(
                     "Current end-effector position could not be retrieved."
@@ -162,7 +173,13 @@ class ControllerNode(Node):
                 return False
 
             # Compute desired end-effector velocity (p_dot)
-            p_dot = np.array([self.tele_x, self.tele_y, self.tele_z])
+            if mode == "TELEOP_G":
+                p_dot = np.array([self.tele_x, self.tele_y, self.tele_z])
+            elif mode == "TELEOP_F":
+                p_dot = r_e @ np.array([self.tele_x, self.tele_y, self.tele_z])
+            else:
+                self.get_logger().warning(f"TELEOP incorrect mode")
+                return False
             # Compute Jacobian
             J = robot.jacob0(self.q)
             J_pos = J[0:3, :]  # Position part of the Jacobian
@@ -197,7 +214,12 @@ class ControllerNode(Node):
             robot = self.robot
 
             p_setpoint = np.array(p_set)
-            p_now = self.get_transform()
+
+            result = self.get_transform()
+            if result is None:
+                self.get_logger().error("get_transform returned None.")
+                return False
+            p_now, r_e = result
             if p_now is None:
                 self.get_logger().error(
                     "Current end-effector position could not be retrieved."
@@ -213,7 +235,7 @@ class ControllerNode(Node):
 
             # Singularity checking by determinant
             det_J = np.linalg.det(J_pos)
-            det_threshold = 1e-100  
+            det_threshold = 1e-100
 
             if abs(det_J) < det_threshold:
                 self.get_logger().warning(
@@ -259,13 +281,24 @@ class ControllerNode(Node):
 
             self.get_logger().info(f"End Effector Position: {x}, {y}, {z}")
             # self.get_logger().info(f"End Effector Orientation: {orientation.x}, {orientation.y}, {orientation.z}, {orientation.w}")
+            # Extract quaternion components
+            qx = orientation.x
+            qy = orientation.y
+            qz = orientation.z
+            qw = orientation.w
 
-            return np.array([x, y, z])  # Return the position as an array
+            rotation = R.from_quat([qx, qy, qz, qw])  # Note: scipy expects [x, y, z, w]
+            rotation_matrix = rotation.as_matrix()  # Get 3x3 rotation matrix
+
+            return (
+                np.array([x, y, z]),
+                rotation_matrix,
+            )  # Return the position as an array
 
         except Exception as e:
             self.get_logger().error(f"Failed to get transform: {e}")
-            self.publish_joint_state(np.array([0.0, 0.0, 0.0])) #Reborn
-            return None
+            self.publish_joint_state(np.array([0.0, 0.0, 0.0]))  # Reborn
+            return None, None  # Ensure a tuple is returned
 
     def inverse_kinematic(self, x, y, z):
         distance_squared = x**2 + y**2 + (z - 0.2) ** 2
@@ -288,10 +321,43 @@ class ControllerNode(Node):
             self.get_logger().error("Target position is out of reach.")
             return None
 
+    def rviz_pub(self,pos):
+        target = PoseStamped()
+        target.header = Header()
+        target.header.stamp = self.get_clock().now().to_msg()
+        target.header.frame_id = 'link_0'
+        target.pose.position.x = float(pos[0])
+        target.pose.position.y = float(pos[1])
+        target.pose.position.z = float(pos[2])
+
+        self.target_pub.publish(target)
+
+        result = self.get_transform()
+        if result is None:
+            self.get_logger().error("get_transform returned None.")
+            return False
+        p_now, r_e = result
+        if p_now is None:
+            self.get_logger().error(
+                "Current end-effector position could not be retrieved."
+            )
+            return False
+
+        endeff = PoseStamped()
+        endeff.header = Header()
+        endeff.header.stamp = self.get_clock().now().to_msg()
+        endeff.header.frame_id = "link_0"
+        endeff.pose.position.x = float(p_now[0])
+        endeff.pose.position.y = float(p_now[1])
+        endeff.pose.position.z = float(p_now[2])
+
+        self.endeff_pub.publish(endeff)
+
     def timer_callback(self):
         try:
             if self.controller_state == "AUTO":
                 continue_control = self.control_to_pos(self.random_setpoint)
+                self.rviz_pub(self.random_setpoint)
                 if not continue_control:
                     self.get_logger().info("Switching to IDLE state.")
                     self.req_scheduler("IDLE")
@@ -299,17 +365,11 @@ class ControllerNode(Node):
 
             elif self.controller_state == "IK":
                 continue_control = self.control_to_pos(self.ik_setpoint)
+                self.rviz_pub(self.ik_setpoint)
                 if not continue_control:
                     self.get_logger().info("Switching to IDLE state.")
                     self.req_scheduler("IDLE")
                     self.controller_state = "IDLE"
-
-            # elif self.controller_state == "TELEOP_G":
-            #     continue_control = self.control_vel("TELEOP_G")
-                # if not continue_control:
-                #     self.get_logger().info("Switching to IDLE state.")
-                #     self.req_scheduler("IDLE")
-                #     self.controller_state = "IDLE"
 
         except Exception as e:
             self.get_logger().error(f"Failed in timer_callback: {e}")
