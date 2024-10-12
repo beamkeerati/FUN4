@@ -23,7 +23,7 @@ A simulation system of a 3R robotic arm that does not take into account collisio
 **Install dependencies**
 
 ```bash
-    pip3 install numpy==1.24.4
+    pip3 install numpy==1.26.4
     pip3 install roboticstoolbox-python
     sudo apt install ros-humble-desktop-full
     sudo apt install ros-dev-tools
